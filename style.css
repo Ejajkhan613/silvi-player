@@ -1,0 +1,111 @@
+:root {
+    --bg-color-light: #f4f4f4;
+    --text-color-light: #222;
+    --bg-color-dark: #121212;
+    --text-color-dark: #eee;
+
+    --accent: #3f51b5;
+    --secondary: #ff4081;
+    --border-radius: 8px;
+}
+
+html[data-theme='light'] {
+    background-color: var(--bg-color-light);
+    color: var(--text-color-light);
+}
+
+html[data-theme='dark'] {
+    background-color: var(--bg-color-dark);
+    color: var(--text-color-dark);
+}
+
+body {
+    font-family: 'Segoe UI', sans-serif;
+    padding: 30px 20px;
+    max-width: 900px;
+    margin: auto;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+h2 {
+    font-size: 2em;
+    margin-bottom: 10px;
+    text-align: center;
+    color: var(--accent);
+}
+
+.controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    margin: 20px 0;
+    gap: 10px;
+}
+
+.controls label {
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+input[type='file'],
+input[type='checkbox'],
+.theme-toggle {
+    cursor: pointer;
+}
+
+.theme-toggle {
+    padding: 6px 12px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    border-radius: var(--border-radius);
+    font-weight: bold;
+    transition: background 0.3s;
+}
+
+.theme-toggle:hover {
+    background: var(--secondary);
+}
+
+video {
+    width: 100%;
+    margin-top: 20px;
+    background: black;
+    border-radius: var(--border-radius);
+    box-shadow: 0 0 12px rgba(0, 0, 0, 0.3);
+}
+
+#statusMessage {
+    margin-top: 10px;
+    font-weight: bold;
+}
+
+#skipIndicator {
+    position: absolute;
+    top: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.75);
+    color: white;
+    padding: 10px 20px;
+    border-radius: var(--border-radius);
+    font-weight: bold;
+    display: none;
+    pointer-events: none;
+    z-index: 1000;
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.5);
+}
+
+@media (max-width: 600px) {
+    .controls {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    h2 {
+        font-size: 1.5em;
+    }
+}
