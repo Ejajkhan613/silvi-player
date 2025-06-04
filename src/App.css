@@ -109,3 +109,17 @@ video {
         font-size: 1.5em;
     }
 }
+
+body.dark-mode {
+    background-color: #1e1e1e;
+    color: #f1f1f1;
+}
+
+body.dark-mode video {
+    border: 2px solid #fff;
+}
+
+.theme-toggle {
+    cursor: pointer;
+    margin-left: 10px;
+}
