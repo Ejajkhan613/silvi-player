@@ -1,47 +1,16 @@
-<!DOCTYPE html>
-<html lang="en" data-theme="light">
+<!doctype html>
+<html lang="en">
 
 <head>
-    <meta charset="UTF-8" />
-    <title>Silvi Player — Smart Video Player</title>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Silvi Player — Smart Video Player</title>
 </head>
 
 <body>
-
-    <h2>🎬 Silvi Player</h2>
-
-    <div class="controls">
-        <input type="file" id="fileInput" accept="video/*" />
-
-        <label>
-            <input type="checkbox" id="skipToggle" checked />
-            Auto-Skip Silence
-        </label>
-
-        <button class="theme-toggle" id="themeToggle">🌙 Dark Mode</button>
-    </div>
-
-    <div id="statusMessage">Please select a video to begin.</div>
-
-    <div id="skipIndicator">⏩ Skipping silence...</div>
-
-    <video id="videoPlayer" controls></video>
-
-    <script src="./index.js"></script>
-    <script>
-        const themeToggleBtn = document.getElementById('themeToggle');
-        const htmlEl = document.documentElement;
-
-        function toggleTheme() {
-            const current = htmlEl.getAttribute('data-theme');
-            const newTheme = current === 'light' ? 'dark' : 'light';
-            htmlEl.setAttribute('data-theme', newTheme);
-            themeToggleBtn.textContent = newTheme === 'light' ? '🌙 Dark Mode' : '☀️ Light Mode';
-        }
-
-        themeToggleBtn.addEventListener('click', toggleTheme);
-    </script>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
 </body>
 
 </html>
