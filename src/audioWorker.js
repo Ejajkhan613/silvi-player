@@ -1,11 +1,7 @@
-// /audioWorker.js
 self.onmessage = (e) => {
     const {
-        chunkIndex,
-        chunkData,
+        audioData,
         sampleRate,
-        startTime,
-        endTime,
         rmsThreshold,
         sampleStep,
         minSilenceDuration
@@ -13,33 +9,35 @@ self.onmessage = (e) => {
 
     try {
         let silenceStart = null;
-        const detectedRanges = [];
 
-        for (let i = 0; i < chunkData.length; i += sampleStep) {
+        for (let i = 0; i < audioData.length; i += sampleStep) {
             let sum = 0;
-            for (let j = i; j < i + sampleStep && j < chunkData.length; j++) {
-                sum += chunkData[j] * chunkData[j];
+            for (let j = i; j < i + sampleStep && j < audioData.length; j++) {
+                sum += audioData[j] * audioData[j];
             }
 
             const rms = Math.sqrt(sum / sampleStep);
-            const currentTime = startTime + i / sampleRate;
+            const currentTime = i / sampleRate;
 
             if (rms < rmsThreshold) {
                 if (silenceStart === null) silenceStart = currentTime;
             } else {
                 if (silenceStart !== null && currentTime - silenceStart >= minSilenceDuration) {
-                    detectedRanges.push([silenceStart, currentTime]);
+                    self.postMessage({ silentRange: [silenceStart, currentTime] });
                 }
                 silenceStart = null;
             }
         }
 
-        if (silenceStart !== null && endTime - silenceStart >= minSilenceDuration) {
-            detectedRanges.push([silenceStart, endTime]);
+        // Catching trailing silence
+        const totalDuration = audioData.length / sampleRate;
+        if (silenceStart !== null && totalDuration - silenceStart >= minSilenceDuration) {
+            self.postMessage({ silentRange: [silenceStart, totalDuration] });
         }
 
-        self.postMessage({ chunkIndex, silentRanges: detectedRanges });
+        self.postMessage({ done: true });
+
     } catch (err) {
-        self.postMessage({ chunkIndex, error: err.message });
+        self.postMessage({ error: err.message });
     }
 };
