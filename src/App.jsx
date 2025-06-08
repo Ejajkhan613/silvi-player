@@ -1,5 +1,3 @@
-// App.jsx
-
 import { useRef, useEffect, useState } from 'react';
 import './App.css';
 
@@ -12,16 +10,18 @@ function App() {
   const statusMessageRef = useRef(null);
   const skipIndicatorRef = useRef(null);
 
-  const [isHovering, setIsHovering] = useState(false);
-  const [isSeeking, setIsSeeking] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(localStorage.getItem('dark-mode') === 'true');
+
+  useEffect(() => {
+    document.body.classList.toggle('dark-mode', isDarkMode);
+  }, [isDarkMode]);
 
   const minSilenceDuration = 1.0;
   const rmsThreshold = 0.02;
   const sampleStep = 1024;
 
   const CHUNK_DURATION = 300;
-  const PRELOAD_THRESHOLD = 60;
+  const PRELOAD_THRESHOLD = 1;
   const [silentRangesMap, setSilentRangesMap] = useState(new Map());
   const [processedChunks, setProcessedChunks] = useState(new Set());
 
@@ -29,14 +29,6 @@ function App() {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const logMessage = (msg) => {
-    const logDiv = document.getElementById('log');
-    if (logDiv) {
-      logDiv.innerHTML += `<div>${msg}</div>`;
-      logDiv.scrollTop = logDiv.scrollHeight;
-    }
   };
 
   const showStatus = (msg) => {
@@ -56,31 +48,17 @@ function App() {
     }
   };
 
-  const processAudioChunk = async (file, chunkIndex) => {
-    if (processedChunks.has(chunkIndex)) return;
-
-    const startTime = chunkIndex * CHUNK_DURATION;
-    const endTime = startTime + CHUNK_DURATION;
-
-    showStatus(`⏳ Processing part ${chunkIndex + 1}...`);
-
+  const processFullAudio = async (file) => {
+    showStatus("Audio Decoding Started");
     try {
-      const arrayBuffer = await file.slice(0).arrayBuffer();
-
+      const arrayBuffer = await file.arrayBuffer();
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-
-      const sampleRate = decodedBuffer.sampleRate;
-      const startSample = Math.floor(startTime * sampleRate);
-      const endSample = Math.min(decodedBuffer.length, Math.floor(endTime * sampleRate));
-      const chunkData = decodedBuffer.getChannelData(0).slice(startSample, endSample);
+      const audioData = decodedBuffer.getChannelData(0);
 
       workerRef.current.postMessage({
-        chunkIndex,
-        chunkData,
-        sampleRate,
-        startTime,
-        endTime,
+        audioData,
+        sampleRate: decodedBuffer.sampleRate,
         rmsThreshold,
         sampleStep,
         minSilenceDuration
@@ -88,9 +66,10 @@ function App() {
 
       audioCtx.close();
     } catch (error) {
-      showStatus(`❌ Error decoding audio: ${error.message}`);
+      showStatus(`❌ Audio Decode Error: ${error.message}`);
     }
   };
+
 
 
   let preloadTimeout;
@@ -113,7 +92,7 @@ function App() {
     ) {
       if (!preloadTimeout) {
         preloadTimeout = setTimeout(() => {
-          processAudioChunk(fileInputRef.current.files[0], currentChunk + 1);
+          processFullAudio(fileInputRef.current.files[0], currentChunk + 1);
           preloadTimeout = null;
         }, 1000); // Only load one chunk per second max
       }
@@ -141,24 +120,36 @@ function App() {
       type: 'module',
     });
 
-
     workerRef.current.onmessage = (e) => {
-      const { chunkIndex, silentRanges, error } = e.data;
+      const { silentRange, done, error } = e.data;
 
       if (error) {
-        showStatus(`❌ Worker error: ${error}`);
+        showStatus(`❌ Worker Error: ${error}`);
         return;
       }
 
-      setSilentRangesMap((prev) => {
-        const newMap = new Map(prev);
-        newMap.set(chunkIndex, silentRanges);
-        return newMap;
-      });
 
-      setProcessedChunks((prev) => new Set(prev).add(chunkIndex));
-      logMessage(`✅ Processing finished of part ${chunkIndex + 1}`);
-      showStatus('✅ Ready to play');
+      if (silentRange) {
+        setSilentRangesMap((prev) => {
+          const newMap = new Map(prev);
+          const chunk = Math.floor(silentRange[0] / CHUNK_DURATION);
+          const ranges = newMap.get(chunk) || [];
+          ranges.push(silentRange);
+          newMap.set(chunk, ranges);
+          return newMap;
+        });
+      }
+
+      if (done) {
+        showStatus('✅ Detection Completed');
+
+        const video = videoRef.current;
+        if (video && video.paused && video.readyState >= 2) {
+          video.play().catch(err => {
+            console.error("⚠️ Couldn't Auto-Play Video:", err.message);
+          });
+        }
+      }
     };
 
     return () => {
@@ -184,38 +175,50 @@ function App() {
       const skipEnabled = skipToggleRef.current.checked;
 
       if (skipEnabled) {
-        showStatus('🔄 Auto-skip enabled. Processing first chunk...');
-        processAudioChunk(file, 0);
+        showStatus('🔄 Auto-Skip Enabled. Processing Audio...');
+        processFullAudio(file);
       } else {
-        showStatus('✅ Ready. Auto-skip disabled.');
+        showStatus('✅ Ready. Auto-Skip Disabled');
       }
     };
 
-    const handleMouseEnter = () => setIsHovering(true);
-    const handleMouseLeave = () => setIsHovering(false);
     const handlePlay = () => requestAnimationFrame(autoSkipSilence);
     const handleEnded = () => {
       if (IS_DEV) console.log('Final silent ranges:', silentRangesMap);
     };
 
     fileInput.addEventListener('change', handleFileChange);
-    video.addEventListener('mouseenter', handleMouseEnter);
-    video.addEventListener('mouseleave', handleMouseLeave);
     video.addEventListener('play', handlePlay);
     video.addEventListener('ended', handleEnded);
 
     return () => {
       fileInput.removeEventListener('change', handleFileChange);
-      video.removeEventListener('mouseenter', handleMouseEnter);
-      video.removeEventListener('mouseleave', handleMouseLeave);
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('ended', handleEnded);
     };
   }, [silentRangesMap, processedChunks]);
 
   useEffect(() => {
-    document.body.classList.toggle('dark-mode', isDarkMode);
+    const savedDark = localStorage.getItem('dark-mode') === 'true';
+    setIsDarkMode(savedDark);
+
+    const savedSkip = localStorage.getItem('skip-enabled') === 'true';
+    skipToggleRef.current.checked = savedSkip;
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('dark-mode', isDarkMode);
   }, [isDarkMode]);
+
+  useEffect(() => {
+    const checkbox = skipToggleRef.current;
+    const handler = () => {
+      localStorage.setItem('skip-enabled', checkbox.checked);
+    };
+    checkbox.addEventListener('change', handler);
+    return () => checkbox.removeEventListener('change', handler);
+  }, []);
+
 
   return (
     <>
@@ -231,10 +234,10 @@ function App() {
         </button>
       </div>
 
-      <div ref={statusMessageRef}>Please select a video to begin.</div>
+      <div ref={statusMessageRef}><b>Please Select a Video to Begin</b></div>
       <div id="log" style={{ fontSize: '0.9em', color: '#666', marginTop: '1em', maxHeight: '120px', overflowY: 'auto' }}></div>
       <div ref={skipIndicatorRef} style={{ display: 'none', fontWeight: 'bold', marginTop: '1em' }}>
-        ⏩ Skipping silence...
+        ⏩ Skipping...
       </div>
       <video ref={videoRef} controls style={{ width: '100%', marginTop: '1em' }}></video>
     </>
