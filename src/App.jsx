@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import './App.css';
 
-const IS_DEV = true;
+const IS_DEV = import.meta.env.VITE_NODE_ENV === 'development';
 
 function App() {
   const fileInputRef = useRef(null);
@@ -11,6 +11,7 @@ function App() {
   const skipIndicatorRef = useRef(null);
 
   const [isDarkMode, setIsDarkMode] = useState(localStorage.getItem('dark-mode') === 'true');
+  const [performanceMetrics, setPerformanceMetrics] = useState(null);
 
   useEffect(() => {
     document.body.classList.toggle('dark-mode', isDarkMode);
@@ -21,9 +22,7 @@ function App() {
   const sampleStep = 1024;
 
   const CHUNK_DURATION = 300;
-  const PRELOAD_THRESHOLD = 1;
   const [silentRangesMap, setSilentRangesMap] = useState(new Map());
-  const [processedChunks, setProcessedChunks] = useState(new Set());
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -48,13 +47,32 @@ function App() {
     }
   };
 
+  const processingStartTimeRef = useRef(null);
+
   const processFullAudio = async (file) => {
+    processingStartTimeRef.current = performance.now();
+    const startTimestamp = new Date().toISOString();
     showStatus("Audio Decoding Started");
+
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // Use a lower sample rate to reduce memory and processing time
+      const targetSampleRate = 16000;
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: targetSampleRate
+      });
+
       const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
       const audioData = decodedBuffer.getChannelData(0);
+
+      if (IS_DEV) {
+        const memory = architecture.getMemoryUsage();
+        console.log(`[Silvi-Player] Processing Started at ${startTimestamp}`);
+        console.log(`[Silvi-Player] Audio Duration: ${decodedBuffer.duration.toFixed(2)}s`);
+        console.log(`[Silvi-Player] Sample Rate: ${decodedBuffer.sampleRate}Hz`);
+        console.log(`[Silvi-Player] Data Points: ${audioData.length}`);
+        if (memory) console.log(`[Silvi-Player] Estimated Heap: ${(memory / 1024 / 1024).toFixed(2)} MB`);
+      }
 
       workerRef.current.postMessage({
         audioData,
@@ -62,7 +80,7 @@ function App() {
         rmsThreshold,
         sampleStep,
         minSilenceDuration
-      });
+      }, [audioData.buffer]); // Transferable Object
 
       audioCtx.close();
     } catch (error) {
@@ -70,9 +88,16 @@ function App() {
     }
   };
 
+  const architecture = {
+    getMemoryUsage: () => {
+      if (window.performance && window.performance.memory) {
+        return window.performance.memory.usedJSHeapSize;
+      }
+      return null;
+    }
+  };
 
 
-  let preloadTimeout;
 
   const autoSkipSilence = () => {
     const video = videoRef.current;
@@ -85,18 +110,6 @@ function App() {
 
     const time = video.currentTime;
     const currentChunk = Math.floor(time / CHUNK_DURATION);
-
-    if (
-      !processedChunks.has(currentChunk + 1) &&
-      time % CHUNK_DURATION >= CHUNK_DURATION - PRELOAD_THRESHOLD
-    ) {
-      if (!preloadTimeout) {
-        preloadTimeout = setTimeout(() => {
-          processFullAudio(fileInputRef.current.files[0], currentChunk + 1);
-          preloadTimeout = null;
-        }, 1000); // Only load one chunk per second max
-      }
-    }
 
     const silentRanges = silentRangesMap.get(currentChunk) || [];
     const inSilent = silentRanges.some(([start, end]) => time >= start && time < end);
@@ -141,7 +154,16 @@ function App() {
       }
 
       if (done) {
+        const endTime = performance.now();
+        const duration = endTime - processingStartTimeRef.current;
         showStatus('✅ Detection Completed');
+
+        if (IS_DEV) {
+          const memory = architecture.getMemoryUsage();
+          console.log(`[Silvi-Player] Processing Completed at ${new Date().toISOString()}`);
+          console.log(`[Silvi-Player] Total Processing Time: ${duration.toFixed(2)}ms`);
+          if (memory) console.log(`[Silvi-Player] Final Estimated Heap: ${(memory / 1024 / 1024).toFixed(2)} MB`);
+        }
 
         const video = videoRef.current;
         if (video && video.paused && video.readyState >= 2) {
@@ -196,7 +218,7 @@ function App() {
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('ended', handleEnded);
     };
-  }, [silentRangesMap, processedChunks]);
+  }, [silentRangesMap]);
 
   useEffect(() => {
     const savedDark = localStorage.getItem('dark-mode') === 'true';
