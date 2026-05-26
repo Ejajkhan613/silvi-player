@@ -346,6 +346,15 @@ export class SilviPlayer {
     }
   }
 
+  public setNormalPlaybackRate(playbackRate: number) {
+    const safePlaybackRate = this.clamp(playbackRate, 0.25, 4);
+    this.config.normalPlaybackRate = safePlaybackRate;
+
+    if (!this.isSkipping) {
+      this.setPlaybackRate(safePlaybackRate);
+    }
+  }
+
   private async processFileFullDecode(file: File) {
     this.updateStatus('Decoding Audio...');
 

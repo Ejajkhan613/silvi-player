@@ -6,12 +6,18 @@ import {
   FileVideo,
   Gauge,
   Loader2,
+  Maximize2,
+  Minimize2,
   Moon,
+  Pause,
+  PictureInPicture2,
   Play,
   Power,
   RefreshCcw,
   Settings,
   ShieldCheck,
+  SkipBack,
+  SkipForward,
   SlidersHorizontal,
   Sun,
   Upload,
@@ -37,6 +43,8 @@ const DEFAULT_SETTINGS = {
   analysisWindow: 0.25,
   fastAudioDecode: true,
 };
+
+const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
 const readBoolean = (key, fallback) => {
   const saved = localStorage.getItem(key);
@@ -153,6 +161,8 @@ function SettingSlider({ icon, label, description, value, min, max, step, suffix
 function App() {
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
+  const videoShellRef = useRef(null);
+  const playerCardRef = useRef(null);
   const objectUrlRef = useRef(null);
   const playerRef = useRef(null);
   const attachedPlayerRef = useRef(null);
@@ -170,9 +180,18 @@ function App() {
   const [needsAnalysis, setNeedsAnalysis] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPictureInPicture, setIsPictureInPicture] = useState(false);
 
   if (playerRef.current === null) {
-    playerRef.current = new SilviPlayer({ ...settings, debug: IS_DEV });
+    playerRef.current = new SilviPlayer({
+      ...settings,
+      normalPlaybackRate: playbackRate,
+      debug: IS_DEV,
+    });
   }
 
   const handleStatusChange = useCallback((nextStatus) => {
@@ -210,6 +229,7 @@ function App() {
 
       const player = new SilviPlayer({
         ...settings,
+        normalPlaybackRate: playbackRate,
         debug: IS_DEV,
       });
 
@@ -217,7 +237,7 @@ function App() {
       if (shouldAttach) attachPlayer(player);
       return player;
     },
-    [attachPlayer, settings],
+    [attachPlayer, playbackRate, settings],
   );
 
   const analyzeFile = useCallback(
@@ -261,13 +281,17 @@ function App() {
 
       setSelectedFile(file);
       setVideoDuration(null);
+      setCurrentTime(0);
+      setIsPlaying(false);
       setNeedsAnalysis(!autoSkipEnabled);
 
       if (videoRef.current) {
         videoRef.current.src = objectUrl;
         videoRef.current.load();
-        videoRef.current.playbackRate = 1;
-        videoRef.current.play().catch(() => {
+        videoRef.current.playbackRate = playbackRate;
+        videoRef.current.play().then(() => {
+          setIsPlaying(true);
+        }).catch(() => {
           // Some browsers still block unmuted autoplay after file selection.
         });
       }
@@ -281,7 +305,7 @@ function App() {
         setStatus('Ready. Auto-skip is off');
       }
     },
-    [analyzeFile, autoSkipEnabled],
+    [analyzeFile, autoSkipEnabled, playbackRate],
   );
 
   const handleFileInput = (event) => {
@@ -315,6 +339,85 @@ function App() {
     setStatus(selectedFile ? 'Auto-skip enabled' : 'Choose a local video to begin');
   };
 
+  const togglePlayback = () => {
+    const video = videoRef.current;
+    if (!video || !selectedFile) {
+      fileInputRef.current?.click();
+      return;
+    }
+
+    if (video.paused || video.ended) {
+      video.play().then(() => setIsPlaying(true)).catch((error) => {
+        setStatus(`Playback blocked: ${error.message}`);
+      });
+      return;
+    }
+
+    video.pause();
+  };
+
+  const seekTo = (nextTime) => {
+    const video = videoRef.current;
+    if (!video || !Number.isFinite(video.duration)) return;
+
+    const clampedTime = Math.min(video.duration, Math.max(0, nextTime));
+    video.currentTime = clampedTime;
+    setCurrentTime(clampedTime);
+  };
+
+  const skipBy = (seconds) => {
+    seekTo((videoRef.current?.currentTime ?? 0) + seconds);
+  };
+
+  const handlePlaybackRateChange = (nextPlaybackRate) => {
+    setPlaybackRate(nextPlaybackRate);
+    playerRef.current?.setNormalPlaybackRate?.(nextPlaybackRate);
+
+    if (videoRef.current && (!autoSkipEnabled || !playerRef.current)) {
+      videoRef.current.playbackRate = nextPlaybackRate;
+    }
+  };
+
+  const toggleFullscreen = async () => {
+    const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+
+    try {
+      if (fullscreenElement) {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else {
+          document.webkitExitFullscreen?.();
+        }
+        return;
+      }
+
+      if (playerCardRef.current?.requestFullscreen) {
+        await playerCardRef.current.requestFullscreen();
+        return;
+      }
+
+      playerCardRef.current?.webkitRequestFullscreen?.();
+    } catch (error) {
+      setStatus(`Fullscreen unavailable: ${error.message}`);
+    }
+  };
+
+  const togglePictureInPicture = async () => {
+    const video = videoRef.current;
+    if (!video || !document.pictureInPictureEnabled) return;
+
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        return;
+      }
+
+      await video.requestPictureInPicture();
+    } catch (error) {
+      setStatus(`Picture-in-picture unavailable: ${error.message}`);
+    }
+  };
+
   const updateSetting = (key, value) => {
     setSettings((current) => sanitizeSettings({ ...current, [key]: value }));
     if (selectedFile) setNeedsAnalysis(true);
@@ -337,6 +440,71 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
   }, [settings]);
+
+  useEffect(() => {
+    const preventContextMenu = (event) => event.preventDefault();
+    document.addEventListener('contextmenu', preventContextMenu);
+
+    return () => {
+      document.removeEventListener('contextmenu', preventContextMenu);
+    };
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return undefined;
+
+    const handleLoadedMetadata = () => {
+      setVideoDuration(video.duration);
+      setCurrentTime(video.currentTime);
+    };
+    const handleTimeUpdate = () => setCurrentTime(video.currentTime);
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(video.duration || 0);
+    };
+    const handleEnterPictureInPicture = () => setIsPictureInPicture(true);
+    const handleLeavePictureInPicture = () => setIsPictureInPicture(false);
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('play', handlePlay);
+    video.addEventListener('pause', handlePause);
+    video.addEventListener('ended', handleEnded);
+    video.addEventListener('enterpictureinpicture', handleEnterPictureInPicture);
+    video.addEventListener('leavepictureinpicture', handleLeavePictureInPicture);
+
+    return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+      video.removeEventListener('play', handlePlay);
+      video.removeEventListener('pause', handlePause);
+      video.removeEventListener('ended', handleEnded);
+      video.removeEventListener('enterpictureinpicture', handleEnterPictureInPicture);
+      video.removeEventListener('leavepictureinpicture', handleLeavePictureInPicture);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+      setIsFullscreen(
+        fullscreenElement === playerCardRef.current ||
+        fullscreenElement === videoShellRef.current ||
+        fullscreenElement === videoRef.current,
+      );
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
   useEffect(() => {
     if (autoSkipEnabled) {
@@ -386,6 +554,15 @@ function App() {
     [autoSkipEnabled, selectedFile, videoDuration],
   );
 
+  const durationSeconds = Number.isFinite(videoDuration) ? videoDuration : 0;
+  const progressPercent = durationSeconds > 0 ? (currentTime / durationSeconds) * 100 : 0;
+  const canUsePictureInPicture = Boolean(
+    selectedFile &&
+    document.pictureInPictureEnabled &&
+    videoRef.current &&
+    !videoRef.current.disablePictureInPicture,
+  );
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -416,7 +593,7 @@ function App() {
       </header>
 
       <section className="workspace">
-        <div className="player-card">
+        <div className="player-card" ref={playerCardRef}>
           <input
             ref={fileInputRef}
             className="sr-only"
@@ -425,13 +602,13 @@ function App() {
             onChange={handleFileInput}
           />
 
-          <div className="video-shell">
+          <div className="video-shell" ref={videoShellRef}>
             <video
               ref={videoRef}
               autoPlay
-              controls
               playsInline
-              onLoadedMetadata={() => setVideoDuration(videoRef.current?.duration ?? null)}
+              onClick={togglePlayback}
+              onDoubleClick={() => void toggleFullscreen()}
             />
 
             {!selectedFile && (
@@ -456,9 +633,103 @@ function App() {
               >
                 <Upload size={34} />
                 <strong>Click or drop a video here</strong>
-                <span>Local files only. Nothing is uploaded.</span>
+                <span>Works locally. No upload.</span>
               </div>
             )}
+          </div>
+
+          <div className="custom-controls">
+            <div className="seek-row">
+              <span>{formatTime(currentTime)}</span>
+              <input
+                className="seek-slider"
+                type="range"
+                min="0"
+                max={durationSeconds || 0}
+                step="0.1"
+                value={Math.min(currentTime, durationSeconds || currentTime)}
+                onChange={(event) => seekTo(Number(event.target.value))}
+                style={{ '--progress': `${progressPercent}%` }}
+                disabled={!selectedFile || durationSeconds === 0}
+                aria-label="Seek video"
+              />
+              <span>{formatTime(durationSeconds)}</span>
+            </div>
+
+            <div className="control-row">
+              <div className="control-group">
+                <button
+                  type="button"
+                  className="control-button"
+                  onClick={() => skipBy(-10)}
+                  disabled={!selectedFile}
+                  title="Back 10 seconds"
+                  aria-label="Back 10 seconds"
+                >
+                  <SkipBack size={18} />
+                </button>
+
+                <button
+                  type="button"
+                  className="control-button primary-control"
+                  onClick={togglePlayback}
+                  disabled={!selectedFile}
+                  title={isPlaying ? 'Pause' : 'Play'}
+                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                >
+                  {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+                </button>
+
+                <button
+                  type="button"
+                  className="control-button"
+                  onClick={() => skipBy(10)}
+                  disabled={!selectedFile}
+                  title="Forward 10 seconds"
+                  aria-label="Forward 10 seconds"
+                >
+                  <SkipForward size={18} />
+                </button>
+              </div>
+
+              <div className="control-group option-group">
+                <select
+                  className="speed-select"
+                  value={playbackRate}
+                  onChange={(event) => handlePlaybackRateChange(Number(event.target.value))}
+                  disabled={!selectedFile}
+                  aria-label="Playback speed"
+                >
+                  {PLAYBACK_RATES.map((rate) => (
+                    <option key={rate} value={rate}>
+                      {rate}x
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  className={`control-button ${isPictureInPicture ? 'is-active' : ''}`}
+                  onClick={() => void togglePictureInPicture()}
+                  disabled={!canUsePictureInPicture}
+                  title="Picture in picture"
+                  aria-label="Picture in picture"
+                >
+                  <PictureInPicture2 size={18} />
+                </button>
+
+                <button
+                  type="button"
+                  className="control-button"
+                  onClick={() => void toggleFullscreen()}
+                  disabled={!selectedFile}
+                  title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                  aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                >
+                  {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                </button>
+              </div>
+            </div>
           </div>
 
           <div className={`transport-panel ${statusKind}`} aria-live="polite">
